@@ -4,17 +4,17 @@ import re
 import pandas
 import sys
 
-# ! Manually calculated constants for excel spreadsheet calculation !
-# Week loop constants
+# ! Константы таблицы, высчитанные в ручную !
+# Константы недели
 WEEK_LOOP_START = 4
 WEEK_LOOP_LIMIT = 86
 WEEK_LOOP_STEP = 14
-# Day lecture loop constants 
+# Константы дня
 LECT_LOOP_START = 0
 LECT_LOOP_END = 14
 
 class schedule_reconciliation:
-    # Loading schedule and workload spreadsheets in constructor, as well as initializing variables for keeping generated messages on mismatches and errors
+    # В конструкторе загружаем таблицы с нагрузкой и расписанием на основе полученных из командной строки путей. 
     def __init__(self, workload_path: str, schedule_path: str,week_loop_start: int, week_loop_limit: int, week_loop_step: int, lect_loop_start: int, lect_loop_end: int):
         self.workload = pandas.read_excel(workload_path, sheet_name="По ППС", usecols=["Мероприятие реестра, норма времени", "Вид потока", "План. поток", "ППС"], skiprows=1)
         self.schedule_workbook = load_workbook(schedule_path) # Загрузка таблицы с расписанием
@@ -28,29 +28,28 @@ class schedule_reconciliation:
         self.lect_loop_end = lect_loop_end
         self.schedule_parser()
 
-    # Method for formatting subject title
+    # Метод для форматирования названия дисциплины
     def subject_formatting(self, subject: str):
-        # First regex to remove any and all line breaks
+        # Этап 1 - Избивляемся от переносов строки
         subject = subject.strip()
         subject = re.sub(r'\s+', ' ', subject)
 
-        # Second regex to capture anything between week and sub-group information
+        # Этап 2 - Вытаскиваем текст между номерами недель, и указанием подгруппы
         result = re.search(r"н.\s+([^\(]+)\s+\(",subject)
         if result is not None and len(result.group(1)) > 0:
             subject = result.group(1)
 
-        # Third regex to remove week info
+        # Этап 3 - Удаляем указание недель
         second_result = re.search(r"^([\d,]+ н\.)\s+(.*)$",subject)
         if second_result is not None and len(second_result.group(2)) > 0:
             subject = second_result.group(2)
         
         return subject
-    
-    # Method for professor name formatting
+    # Метод для форматирования имени преподавателя
     def professor_formatting(self, professor_name: str,source: str):
-        # Fomatting professor name with a regex based on the name source
+        # Форматируем имя преподавателя, регулярное выражение меняется в зависимости от источника имени
         match source:
-            # Formatting name from schedule
+            # Форматировани имени из расписания
             case "schedule":
                 result = re.search(r'^([А-Яа-яЁё]+)\s([А-Яа-яЁё])[а-яё]*\s([А-Яа-яЁё])\.?$',professor_name)
                 if result is not None:
@@ -59,7 +58,7 @@ class schedule_reconciliation:
                 else:
                     return professor_name
 
-            # Formatting name from workload
+            # Форматирование имени из нагрузки
             case "workload":
                 result = re.search(r"^([А-Яа-яЁё]+)\s([А-Яа-яЁё])\w*\s([А-Яа-яЁё])\w",professor_name)
                 if result is not None:
@@ -70,7 +69,7 @@ class schedule_reconciliation:
             case _:
                 pass
     
-    # Method of forming messages about errors/mismatches
+    # Метод формирования сообщения об ошибки/несоответствии с нагрузкой
     def message_generator(self, group: str, subject: str, class_type: str, type:str, expected_professor = "", set_professor = ""):
         set_professor = set_professor or "Не указано"
         match type:
@@ -86,24 +85,25 @@ class schedule_reconciliation:
             case _:
                 pass
 
-    # Method for matching data from schedule with workload
+    # Метод сверки с нагрузкой
     def workload_matcher(self, group: str, subject:str, class_type:str, set_professor:str):
-        # Filtering workload down to a single line with the necessary group, class type and subject
+        # Фильтруем нагрузку до одной строки, с нужной группой, форматом занятия и дисциплиной
         subject_workload = self.workload[self.workload["Мероприятие реестра, норма времени"].str.contains(subject, na=False, case=False, regex=False) & self.workload["План. поток"].str.contains(group,na=False,case=False,regex=False) & self.workload["Вид потока"].str.contains(class_type, na=False)]
-        # Checking if the subject is part of department's workload
+        # Проверка на присутствие в нагрузке проверяемой дисциплины
         if subject_workload.empty == True:
             pass
-        # If the subject is a part of department's workload, continue the reconciliation
+        # Если дисцпилина существует в нагрузке, продолжаем сверку
         else:
             expected_professor = self.professor_formatting(subject_workload["ППС"].iloc[0],"workload")
-            # If the professor attached to the lesson in workload didn't match the one stated in schedule, form a message and add it to the message list
+            # Если значение из нагрузки и расписания не сошлось, формируем сообщение о несоответствии и добавляем его в список
             if expected_professor != set_professor:
                 self.message_generator(group,subject,class_type,"mismatch", expected_professor,set_professor)
 
-    # Method for finding columns, containing group schedules
+    # Метод выявляющий столбцы в которых указаны группы и фиксирующий их название
     def group_finder(self):
         group_columns = []
         group_names = []
+        # Метод для поиска столбцов с учебными группами. 
         for row in self.schedule.iter_rows():
             for cell in row:
                 if cell.value != None:
@@ -112,39 +112,39 @@ class schedule_reconciliation:
                         group_names.append(cell.value)
         self.week_parser(group_columns,group_names)
     
-    # Method for analyzing each groups week schedule
+    # Метод анализа расписания недели каждой учебной группы, найденной в group_finder
     def week_parser(self, group_columns: list, group_names: list):
         for group in group_columns:
-            # Loop going through weeks
+            # Проход по недели (4,86,14)
             for week in range(self.week_loop_start,self.week_loop_limit,self.week_loop_step):
-                # Loop going through individual subjects
+                # Проход по дням
                 for lecture in range(self.lect_loop_start,self.lect_loop_end):
-                    # Pulling subject name from the schedule spreadsheet
+                    # Вытягиваем значение дисциплины из таблицы 
                     subject = self.schedule[group+str(week+lecture)].value 
-                    # If there is none, skipping onto the next
+                    # Если поле дисциплины пустое, то пропускаем строку
                     if subject is None: 
                         pass
                     else:
-                        # Formatting the subject, as well as saving professor and class-type (lecture, seminary, lab work) for further analysis
                         subject = self.subject_formatting(str(subject))
+                        # Записываем данные о преподавателе и виде занятия
                         professor = self.schedule[get_column_letter(column_index_from_string(group)+2)+str(week+lecture)].value
                         class_type = self.schedule[get_column_letter(column_index_from_string(group)+1)+str(week+lecture)].value
 
-                        # Due to the specifics of the schedule table, we have to ensure that subject is not present by also verifying that it's class_type is absent in the spreadsheet
+                        # Если занятие присутствует, продолжаем проверку
                         if class_type == None:
                             pass
 
-                        # Checking for no professor listed at the lesosn
+                        # Проверка на то указан ли преподаватель, если нет, то выдаем сообщение об отсутствии преподавателя
                         elif professor == None and class_type != None:
-                            class_type = str(class_type)[:3] # Slicing class-type to ensure a one-line message
+                            class_type = str(class_type)[:3] # Производим срез типа занятия для избежания многострочного вывода
                             self.message_generator(group_names[group_columns.index(group)], subject, class_type, type="no professor")
                         
-                        # If the professor is set, comparing the entry with the workload
+                        # Если преподаватель указан, начинаем сверку с нагрузкой
                         else:
-                            class_type = str(class_type)[:3] # Slicing class-type to ensure a one-line message                       
+                            class_type = str(class_type)[:3] # Производим срез типа занятия для избежания многострочного вывода                        
                             self.workload_matcher(group_names[group_columns.index(group)],subject,class_type,self.professor_formatting(professor,"schedule"))
     
-    # Function starting a parser sequence and priting final message
+    # Функция запускающая прогон парсера и выводящая итоговое сообщение
     def schedule_parser(self):
         print("Добро пожаловать в программу сверки расписания")
         self.group_finder()
