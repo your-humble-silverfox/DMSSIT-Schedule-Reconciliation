@@ -46,45 +46,35 @@ class schedule_reconciliation:
         
         return subject
     
-    # Method for professor name formatting
-    def professor_formatting(self, professor_name: str,source: str):
-        # Fomatting professor name with a regex based on the name source
-        match source:
-            # Formatting name from schedule
-            case "schedule":
-                result = re.search(r'^([А-Яа-яЁё]+)\s([А-Яа-яЁё])[а-яё]*\s([А-Яа-яЁё])\.?$',professor_name)
-                if result is not None:
-                    professor = result.group(1) + " " + result.group(2)+"."+result.group(3)+"."
-                    return professor
-                else:
-                    return professor_name
-
-            # Formatting name from workload
-            case "workload":
-                result = re.search(r"^([А-Яа-яЁё]+)\s([А-Яа-яЁё])\w*\s([А-Яа-яЁё])\w",professor_name)
-                if result is not None:
-                    expected_professor = result.group(1) + " " + result.group(2)+"."+result.group(3)+"."
-                    return expected_professor
-                else:
-                    pass
-            case _:
-                pass
+    # Method for formatting professor names acquired from schedule file
+    def schedule_professor_formatting(self, professor_name):
+        result = re.search(r'^([А-Яа-яЁё]+)\s([А-Яа-яЁё])[а-яё]*\s([А-Яа-яЁё])\.?$',professor_name)
+        if result is not None:
+            professor = result.group(1) + " " + result.group(2)+"."+result.group(3)+"."
+            return professor
+        else:
+            return professor_name
     
-    # Method of forming messages about errors/mismatches
-    def message_generator(self, group: str, subject: str, class_type: str, type:str, expected_professor = "", set_professor = ""):
+    # Method for formatting professor names acquired from workload file
+    def workload_professor_formatting(self, professor_name):
+        result = re.search(r"^([А-Яа-яЁё]+)\s([А-Яа-яЁё])\w*\s([А-Яа-яЁё])\w",professor_name)
+        if result is not None:
+            expected_professor = result.group(1) + " " + result.group(2)+"."+result.group(3)+"."
+            return expected_professor
+        else:
+            pass
+    
+    # Method for generating a message in case of mismatch of professors in workload and schedule
+    def mismatch_message_generator(self, group:str, subject: str, class_type:str, expected_professor:str, set_professor:str):
         set_professor = set_professor or "Не указано"
-        match type:
-            case "no professor":
-                no_prof_message = subject + " " + group + " " + class_type +  " НЕ УКАЗАН ПРЕПОДАВАТЕЛЬ"
-                no_prof_message = no_prof_message.replace('\n', ' ').replace('\r', ' ')
-                self.no_prof_messages.append(no_prof_message)
-                pass
-            case "mismatch":
-                wrong_prof_message = subject + " " + group + " " + class_type + " ДОЛЖЕН БЫТЬ: " + expected_professor + " СТОИТ: " + set_professor
-                self.mismatch_messages.append(wrong_prof_message)
-                pass
-            case _:
-                pass
+        wrong_prof_message = subject + " " + group + " " + class_type + " ДОЛЖЕН БЫТЬ: " + expected_professor + " СТОИТ: " + set_professor
+        self.mismatch_messages.append(wrong_prof_message)
+
+    # Method for generating a message in case of no professor being set in the schedule
+    def missing_professor_message_generator(self, group:str, subject: str, class_type:str):
+        no_prof_message = subject + " " + group + " " + class_type +  " НЕ УКАЗАН ПРЕПОДАВАТЕЛЬ"
+        no_prof_message = no_prof_message.replace('\n', ' ').replace('\r', ' ')
+        self.no_prof_messages.append(no_prof_message)
 
     # Method for matching data from schedule with workload
     def workload_matcher(self, group: str, subject:str, class_type:str, set_professor:str):
@@ -95,10 +85,11 @@ class schedule_reconciliation:
             pass
         # If the subject is a part of department's workload, continue the reconciliation
         else:
-            expected_professor = self.professor_formatting(subject_workload["ППС"].iloc[0],"workload")
+            #expected_professor = self.professor_formatting(subject_workload["ППС"].iloc[0],"workload")
+            expected_professor = self.workload_professor_formatting(subject_workload["ППС"].iloc[0])
             # If the professor attached to the lesson in workload didn't match the one stated in schedule, form a message and add it to the message list
             if expected_professor != set_professor:
-                self.message_generator(group,subject,class_type,"mismatch", expected_professor,set_professor)
+                self.mismatch_message_generator(group,subject,class_type,expected_professor, set_professor)
 
     # Method for finding columns, containing group schedules
     def group_finder(self):
@@ -137,12 +128,12 @@ class schedule_reconciliation:
                         # Checking for no professor listed at the lesosn
                         elif professor == None and class_type != None:
                             class_type = str(class_type)[:3] # Slicing class-type to ensure a one-line message
-                            self.message_generator(group_names[group_columns.index(group)], subject, class_type, type="no professor")
+                            self.missing_professor_message_generator(group_names[group_columns.index(group)], subject, class_type)
                         
                         # If the professor is set, comparing the entry with the workload
                         else:
                             class_type = str(class_type)[:3] # Slicing class-type to ensure a one-line message                       
-                            self.workload_matcher(group_names[group_columns.index(group)],subject,class_type,self.professor_formatting(professor,"schedule"))
+                            self.workload_matcher(group_names[group_columns.index(group)],subject,class_type,self.schedule_professor_formatting(professor))
     
     # Function starting a parser sequence and priting final message
     def schedule_parser(self):
