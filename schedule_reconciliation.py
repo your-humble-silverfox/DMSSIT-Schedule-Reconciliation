@@ -15,9 +15,14 @@ LECT_LOOP_END = 14
 
 class schedule_reconciliation:
     # Loading schedule and workload spreadsheets in constructor, as well as initializing variables for keeping generated messages on mismatches and errors
-    def __init__(self, workload_path: str, schedule_path: str,week_loop_start: int, week_loop_limit: int, week_loop_step: int, lect_loop_start: int, lect_loop_end: int):
-        self.workload = pandas.read_excel(workload_path, sheet_name="По ППС", usecols=["Мероприятие реестра, норма времени", "Вид потока", "План. поток", "ППС"], skiprows=1)
-        self.schedule_workbook = load_workbook(schedule_path) # Загрузка таблицы с расписанием
+    def __init__(self, workload_file, schedule_file,week_loop_start=WEEK_LOOP_START, week_loop_limit=WEEK_LOOP_LIMIT, week_loop_step=WEEK_LOOP_STEP, lect_loop_start=LECT_LOOP_START, lect_loop_end=LECT_LOOP_END):
+        #self.workload = pandas.read_excel(workload_path, sheet_name="По ППС", usecols=["Мероприятие реестра, норма времени", "Вид потока", "План. поток", "ППС"], skiprows=1)
+        workload_file.seek(0)
+        schedule_file.seek(0)
+       
+        self.workload = pandas.read_excel(workload_file, sheet_name="По ППС", usecols=["Мероприятие реестра, норма времени", "Вид потока", "План. поток", "ППС"], skiprows=1)
+        #self.schedule_workbook = load_workbook(schedule_path) # Загрузка таблицы с расписанием
+        self.schedule_workbook = load_workbook(schedule_file)
         self.schedule = self.schedule_workbook[self.schedule_workbook.sheetnames[0]] # Загрузка первого листа таблицы
         self.mismatch_messages = []
         self.no_prof_messages = []
@@ -26,7 +31,6 @@ class schedule_reconciliation:
         self.week_loop_step = week_loop_step
         self.lect_loop_start = lect_loop_start
         self.lect_loop_end = lect_loop_end
-        self.schedule_parser()
 
     # Method for formatting subject title
     def subject_formatting(self, subject: str):
@@ -67,29 +71,37 @@ class schedule_reconciliation:
     # Method for generating a message in case of mismatch of professors in workload and schedule
     def mismatch_message_generator(self, group:str, subject: str, class_type:str, expected_professor:str, set_professor:str):
         set_professor = set_professor or "Не указано"
-        wrong_prof_message = subject + " " + group + " " + class_type + " ДОЛЖЕН БЫТЬ: " + expected_professor + " СТОИТ: " + set_professor
-        self.mismatch_messages.append(wrong_prof_message)
+        message = (
+            f"{subject} {group} {class_type} "
+            f"ДОЛЖЕН БЫТЬ: {expected_professor} "
+            f"СТОИТ: {set_professor}"
+        )
+        self.mismatch_messages.append(message)
 
     # Method for generating a message in case of no professor being set in the schedule
     def missing_professor_message_generator(self, group:str, subject: str, class_type:str):
-        no_prof_message = subject + " " + group + " " + class_type +  " НЕ УКАЗАН ПРЕПОДАВАТЕЛЬ"
-        no_prof_message = no_prof_message.replace('\n', ' ').replace('\r', ' ')
-        self.no_prof_messages.append(no_prof_message)
+        message = (
+            f"{subject} {group} {class_type} "
+            f"НЕ УКАЗАН ПРЕПОДАВАТЕЛЬ"
+        )
+        self.no_prof_messages.append(
+            message.replace('\n', ' ').replace('\r', ' ')
+        )
 
     # Method for matching data from schedule with workload
     def workload_matcher(self, group: str, subject:str, class_type:str, set_professor:str):
         # Filtering workload down to a single line with the necessary group, class type and subject
         subject_workload = self.workload[self.workload["Мероприятие реестра, норма времени"].str.contains(subject, na=False, case=False, regex=False) & self.workload["План. поток"].str.contains(group,na=False,case=False,regex=False) & self.workload["Вид потока"].str.contains(class_type, na=False)]
         # Checking if the subject is part of department's workload
-        if subject_workload.empty == True:
-            pass
+        if subject_workload.empty:
+            return
         # If the subject is a part of department's workload, continue the reconciliation
         else:
             #expected_professor = self.professor_formatting(subject_workload["ППС"].iloc[0],"workload")
             expected_professor = self.workload_professor_formatting(subject_workload["ППС"].iloc[0])
             # If the professor attached to the lesson in workload didn't match the one stated in schedule, form a message and add it to the message list
             if expected_professor != set_professor:
-                self.mismatch_message_generator(group,subject,class_type,expected_professor, set_professor)
+                self.mismatch_message_generator(group,subject,class_type, expected_professor, set_professor)
 
     # Method for finding columns, containing group schedules
     def group_finder(self):
@@ -135,30 +147,44 @@ class schedule_reconciliation:
                             class_type = str(class_type)[:3] # Slicing class-type to ensure a one-line message                       
                             self.workload_matcher(group_names[group_columns.index(group)],subject,class_type,self.schedule_professor_formatting(professor))
     
-    # Function starting a parser sequence and priting final message
-    def schedule_parser(self):
-        print("Добро пожаловать в программу сверки расписания")
+    # Method for full schedule reconciliation
+    def full_check(self):
         self.group_finder()
         if not self.mismatch_messages and not self.no_prof_messages:
-            print("При сверке не обнаружено ошибок")
-        elif not self.mismatch_messages and self.no_prof_messages:
-            print("При сверке обнаружены следующие ошибки:")
-            for message in self.no_prof_messages:
-                print(message)
-        elif self.mismatch_messages and not self.no_prof_messages:
-            print("При сверке расписания обнаружены следующие расхождения:")
-            for message in self.mismatch_messages:
-                print(message)
+            return {
+                "status": "ok"
+            }
         else:
-            print("При сверке расписания обнаружены следующие ошибки:")
-            for message in self.no_prof_messages:
-                print(message)
-            print()
-            print("При сверке расписания обнаружены следующие расхождения:")
-            for message in self.mismatch_messages:
-                print(message)
-                        
- 
-path_schedule = sys.argv[1]
-path_workload = sys.argv[2]
-schedule_parser = schedule_reconciliation(path_workload,path_schedule,WEEK_LOOP_START,WEEK_LOOP_LIMIT,WEEK_LOOP_STEP,LECT_LOOP_START,LECT_LOOP_END)
+            return {
+                "status": "errors_found",
+                "missing_professors": self.no_prof_messages,
+                "mismatched_professors": self.mismatch_messages
+            }
+    
+    # Method for reconciliation, returning only mismatches
+    def mismatch_check(self):
+        self.group_finder()
+
+        if not self.mismatch_messages:
+            return{
+                "status":("No mismatch found")
+            }
+        else:
+            return{
+                "status":("Mismatches_found"),
+                "mismatched_professors": self.mismatch_messages
+            }
+    
+    # Method for reconciliation, returning specifically missing professors
+    def no_prof_check(self):
+        self.group_finder()
+
+        if not self.no_prof_messages:
+            return{
+                "status":("Missing professors not found")
+            }
+        else:
+            return{
+                "status":("Missing Professors found"),
+                "mismatched_professors": self.no_prof_messages
+            }
